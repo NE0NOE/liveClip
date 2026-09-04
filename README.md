@@ -1,5 +1,10 @@
 # 📋 AutoClip Pro - Sincronizador de Portapapeles & Escritura En Vivo (Android ➔ PC)
 
+[![Android](https://img.shields.io/badge/Android-Kotlin-green?style=for-the-badge&logo=android&logoColor=white)](https://developer.android.com/)
+[![Python](https://img.shields.io/badge/Python-Server-blue?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
+[![WebSockets](https://img.shields.io/badge/WebSockets-Real--Time-orange?style=for-the-badge)](https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API)
+[![License](https://img.shields.io/badge/License-MIT-purple?style=for-the-badge)](LICENSE)
+
 **AutoClip Pro** es una solución avanzada que conecta tu teléfono Android directamente con tu computadora, permitiendo:
 1. 📲 **Uso en segundo plano** con notificación permanente y botones de acceso directo.
 2. 📷 **Sincronización instantánea mediante Código QR** (con soporte para recordar y alternar entre distintas computadoras).
