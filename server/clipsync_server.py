@@ -156,6 +156,40 @@ try:
 except Exception as e:
     print(f"[!] Evdev no disponible ({e}), usando controladores de usuario.")
 
+def _windows_set_clipboard(text: str) -> bool:
+    """Copies text to the Windows clipboard natively using Win32 API via ctypes (zero external dependencies)."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+
+        CF_UNICODETEXT = 13
+        GMEM_MOVEABLE = 0x0002
+
+        if not user32.OpenClipboard(None):
+            return False
+        try:
+            user32.EmptyClipboard()
+            data = text.encode('utf-16le') + b'\x00\x00'
+            h_mem = kernel32.GlobalAlloc(GMEM_MOVEABLE, len(data))
+            if not h_mem:
+                return False
+            p_mem = kernel32.GlobalLock(h_mem)
+            if not p_mem:
+                return False
+            ctypes.memmove(p_mem, data, len(data))
+            kernel32.GlobalUnlock(h_mem)
+            if not user32.SetClipboardData(CF_UNICODETEXT, h_mem):
+                return False
+            return True
+        finally:
+            user32.CloseClipboard()
+    except Exception:
+        return False
+
 def set_system_clipboard(text: str, notify: bool = True) -> bool:
     global last_clip_text, last_clip_time, last_notify_time, clip_history, tk_root
     now = time.time()
@@ -197,17 +231,22 @@ def set_system_clipboard(text: str, notify: bool = True) -> bool:
 
     success = False
 
-    # Method 1: wl-copy (Wayland native)
-    try:
-        p = subprocess.Popen(['wl-copy'], stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        p.communicate(input=text.encode('utf-8'), timeout=1)
-        if p.returncode == 0:
-            success = True
-    except Exception:
-        pass
+    # Windows Native Method (ctypes Win32 API)
+    if sys.platform == "win32":
+        success = _windows_set_clipboard(text)
 
-    # Method 2: xclip (X11 native)
-    if not success:
+    # Method 1: wl-copy (Wayland native on Linux)
+    if not success and sys.platform != "win32":
+        try:
+            p = subprocess.Popen(['wl-copy'], stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            p.communicate(input=text.encode('utf-8'), timeout=1)
+            if p.returncode == 0:
+                success = True
+        except Exception:
+            pass
+
+    # Method 2: xclip (X11 native on Linux)
+    if not success and sys.platform != "win32":
         try:
             p = subprocess.Popen(['xclip', '-selection', 'clipboard'], stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
             p.communicate(input=text.encode('utf-8'), timeout=1)
@@ -216,7 +255,7 @@ def set_system_clipboard(text: str, notify: bool = True) -> bool:
         except Exception:
             pass
 
-    # Method 3: Tkinter clipboard
+    # Method 3: Tkinter clipboard (Multiplatform)
     if not success and tk_root is not None:
         try:
             def _tk_copy():
@@ -228,7 +267,7 @@ def set_system_clipboard(text: str, notify: bool = True) -> bool:
         except Exception as e:
             pass
 
-    # Method 4: pyperclip
+    # Method 4: pyperclip (Multiplatform)
     if not success:
         try:
             import pyperclip
@@ -254,14 +293,32 @@ def set_system_clipboard(text: str, notify: bool = True) -> bool:
     if notify and (now - last_notify_time > 1.5):
         last_notify_time = now
         def _notify():
-            try:
-                subprocess.run(
-                    ["notify-send", "-a", "AutoClip", "-t", "1200", "-i", "edit-paste",
-                     "📋 AutoClip sincronizado", f"{len(text)} caracteres: {preview}"],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-                )
-            except Exception:
-                pass
+            if sys.platform == "win32":
+                try:
+                    escaped_title = "AutoClip sincronizado".replace('"', '`"')
+                    escaped_msg = f"{len(text)} caracteres: {preview}".replace('"', '`"')
+                    ps_cmd = (
+                        f'[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null; '
+                        f'$template = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02); '
+                        f'$textNodes = $template.GetElementsByTagName("text"); '
+                        f'$textNodes.Item(0).AppendChild($template.CreateTextNode("{escaped_title}")) > $null; '
+                        f'$textNodes.Item(1).AppendChild($template.CreateTextNode("{escaped_msg}")) > $null; '
+                        f'$toast = [Windows.UI.Notifications.ToastNotification]::new($template); '
+                        f'[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("AutoClip").Show($toast)'
+                    )
+                    subprocess.Popen(["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps_cmd],
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                except Exception:
+                    pass
+            else:
+                try:
+                    subprocess.run(
+                        ["notify-send", "-a", "AutoClip", "-t", "1200", "-i", "edit-paste",
+                         "📋 AutoClip sincronizado", f"{len(text)} caracteres: {preview}"],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                    )
+                except Exception:
+                    pass
         threading.Thread(target=_notify, daemon=True).start()
 
     print(f"\n[+] [{time.strftime('%H:%M:%S')}] Portapapeles PC actualizado ({len(text)} chars):\n    \"{preview}\"")
@@ -363,35 +420,64 @@ def get_system_clipboard() -> str:
 
 def get_local_ips():
     ips = []
+    # 1. Primary route via UDP dummy connection (Multiplatform)
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(('8.8.8.8', 80))
-        ips.append(s.getsockname()[0])
+        primary_ip = s.getsockname()[0]
+        if primary_ip and primary_ip not in ips:
+            ips.append(primary_ip)
         s.close()
     except Exception:
         pass
 
-    try:
-        out = subprocess.check_output(["ip", "-4", "addr", "show"], text=True, stderr=subprocess.DEVNULL)
-        for line in out.splitlines():
-            line = line.strip()
-            if line.startswith("inet "):
-                ip = line.split()[1].split("/")[0]
-                if not ip.startswith("127.") and not ip.startswith("172.17.") and not ip.startswith("172.18.") and ip not in ips:
+    # 2. Windows IP discovery
+    if sys.platform == "win32":
+        try:
+            hostname = socket.gethostname()
+            for ip in socket.gethostbyname_ex(hostname)[2]:
+                if not ip.startswith("127.") and not ip.startswith("169.254.") and ip not in ips:
                     ips.append(ip)
-    except Exception:
-        pass
+        except Exception:
+            pass
+    else:
+        # 3. Linux/Unix IP discovery
+        try:
+            out = subprocess.check_output(["ip", "-4", "addr", "show"], text=True, stderr=subprocess.DEVNULL)
+            for line in out.splitlines():
+                line = line.strip()
+                if line.startswith("inet "):
+                    ip = line.split()[1].split("/")[0]
+                    if not ip.startswith("127.") and not ip.startswith("172.17.") and not ip.startswith("172.18.") and ip not in ips:
+                        ips.append(ip)
+        except Exception:
+            pass
 
     if not ips:
         ips.append("127.0.0.1")
     return ips
 
+def find_adb_executable():
+    """Locates adb executable in PATH or standard Android SDK directories on Windows/Linux/macOS."""
+    import shutil
+    adb_path = shutil.which("adb")
+    if adb_path:
+        return adb_path
+    if sys.platform == "win32":
+        local_app_data = os.environ.get("LOCALAPPDATA", "")
+        if local_app_data:
+            candidate = os.path.join(local_app_data, "Android", "Sdk", "platform-tools", "adb.exe")
+            if os.path.isfile(candidate):
+                return candidate
+    return "adb"
+
 def setup_adb_reverse(port: int):
     """If an Android device is plugged in via USB, forward the port automatically."""
+    adb_bin = find_adb_executable()
     try:
-        res = subprocess.run(["adb", "devices"], capture_output=True, text=True, timeout=2)
+        res = subprocess.run([adb_bin, "devices"], capture_output=True, text=True, timeout=2)
         if "device\n" in res.stdout or "\tdevice" in res.stdout:
-            sub = subprocess.run(["adb", "reverse", f"tcp:{port}", f"tcp:{port}"], capture_output=True, text=True, timeout=2)
+            sub = subprocess.run([adb_bin, "reverse", f"tcp:{port}", f"tcp:{port}"], capture_output=True, text=True, timeout=2)
             if sub.returncode == 0:
                 print(f"[✓] ADB Reverse activo: El celular puede conectarse directamente a http://localhost:{port} por USB!")
             else:
@@ -419,7 +505,7 @@ HTML_PAGE = """<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AutoClip Pro - PC Companion & Live Sync</title>
+  <title>AutoClip - PC Companion & Live Sync</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -779,7 +865,7 @@ HTML_PAGE = """<!DOCTYPE html>
       <div class="logo-badge">
         <div class="logo-icon">⚡</div>
         <div>
-          <h1>AutoClip Pro</h1>
+          <h1>AutoClip</h1>
           <p style="font-size: 0.75rem; color: var(--text-muted);">Sincronizador & Escritura En Vivo en PC</p>
         </div>
       </div>
@@ -1092,7 +1178,7 @@ class AutoClipHTTPHandler(BaseHTTPRequestHandler):
             self.end_headers()
             data = {
                 "status": "online",
-                "service": "AutoClip Pro PC Companion",
+                "service": "AutoClip PC Companion",
                 "hostname": socket.gethostname(),
                 "ips": get_local_ips(),
                 "port": PORT,
@@ -1225,7 +1311,7 @@ def main():
     server_thread.start()
 
     print("=" * 68)
-    print(" 🚀 AutoClip Pro Server - Sincronizador & Escritura En Vivo")
+    print(" 🚀 AutoClip Server - Sincronizador & Escritura En Vivo")
     print("=" * 68)
     print(f" [*] Estado: Activo y escuchando en el puerto {PORT}")
     print(f" [*] Conexión WiFi (celular en la misma red):")

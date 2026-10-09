@@ -1,0 +1,6 @@
+# AutoClip Server Dependencies
+# Multiplatform (Windows, Linux, macOS)
+
+pynput>=1.7.6
+qrcode>=7.4.2
+pyperclip>=1.8.2

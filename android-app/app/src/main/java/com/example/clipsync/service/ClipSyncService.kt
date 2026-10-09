@@ -217,7 +217,7 @@ class ClipSyncService : Service() {
         val modeTitle = if (isLive) "⚡ Escritura en Vivo" else "📋 Portapapeles PC"
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("AutoClip Pro • $modeTitle")
+            .setContentTitle("AutoClip • $modeTitle")
             .setContentText(statusText)
             .setSmallIcon(com.example.clipsync.R.drawable.ic_bolt)
             .setContentIntent(openAppPendingIntent)

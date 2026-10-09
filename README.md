@@ -1,21 +1,28 @@
-# 📋 AutoClip Pro - Sincronizador de Portapapeles & Escritura En Vivo (Android ➔ PC)
+# 📋 AutoClip - Sincronizador de Portapapeles & Escritura En Vivo (Android ➔ PC)
 
 [![Android](https://img.shields.io/badge/Android-Kotlin-green?style=for-the-badge&logo=android&logoColor=white)](https://developer.android.com/)
 [![Python](https://img.shields.io/badge/Python-Server-blue?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
-[![WebSockets](https://img.shields.io/badge/WebSockets-Real--Time-orange?style=for-the-badge)](https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API)
+[![Multiplatform](https://img.shields.io/badge/PC-Windows%20%7C%20Linux%20%7C%20macOS-blueviolet?style=for-the-badge)](README.md)
 [![License](https://img.shields.io/badge/License-MIT-purple?style=for-the-badge)](LICENSE)
 
-**AutoClip Pro** es una solución avanzada que conecta tu teléfono Android directamente con tu computadora, permitiendo:
+**AutoClip** es una solución avanzada que conecta tu teléfono Android directamente con tu computadora (Windows y Linux), permitiendo:
 1. 📲 **Uso en segundo plano** con notificación permanente y botones de acceso directo.
 2. 📷 **Sincronización instantánea mediante Código QR** (con soporte para recordar y alternar entre distintas computadoras).
 3. ⚡ **Modo En Vivo**: Escribe en tu celular y el texto se escribirá en tiempo real directamente en cualquier campo o ventana activa de tu computadora.
+4. 🎙️ **Dictado Continuo por Voz (Estilo YouTube)**: Dicta sin abrir el teclado, sin cortes por pausas de silencio y con transcripción en vivo directa a tu PC.
 
 ---
 
-## 🚀 Inicio Rápido
+## 🚀 Inicio Rápido en tu Computadora
 
-### 1. Iniciar el Servidor en tu Computadora
-En la terminal de tu computadora, ejecuta:
+### En Windows:
+Haz doble clic sobre el archivo **`run_server.bat`** (o ejecuta en CMD/PowerShell):
+```cmd
+run_server.bat
+```
+
+### En Linux / macOS:
+En la terminal, ejecuta:
 ```bash
 ./run_server.sh
 ```

@@ -50,12 +50,21 @@ data class ClipSyncUiState(
     val isSettingsOpen: Boolean = false,
     val isHistoryOpen: Boolean = false,
     val isQrScannerOpen: Boolean = false,
-    val isServiceRunning: Boolean = false
+    val isServiceRunning: Boolean = false,
+    // Voice dictation state
+    val isVoiceDialogOpen: Boolean = false,
+    val isVoiceListening: Boolean = false,
+    val voiceRms: Float = 0f,
+    val voiceSessionText: String = "",
+    val voicePartialText: String = "",
+    val voiceStatusMessage: String = "Toca el micrófono para comenzar",
+    val isVoiceContinuous: Boolean = true
 )
 
 @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
 class ClipSyncViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = ClipSyncRepository(application.applicationContext)
+    private val voiceDictationManager = com.example.clipsync.voice.VoiceDictationManager(application.applicationContext)
 
     private val _uiState = MutableStateFlow(ClipSyncUiState())
     val uiState: StateFlow<ClipSyncUiState> = _uiState.asStateFlow()
@@ -64,6 +73,7 @@ class ClipSyncViewModel(application: Application) : AndroidViewModel(application
     private var lastSentText: String = ""
     private var syncJob: Job? = null
     private var healthCheckJob: Job? = null
+    private var historyDebounceJob: Job? = null
 
     init {
         val config = repository.getServerConfig()
@@ -77,6 +87,27 @@ class ClipSyncViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             ClipSyncService.isRunning.collect { running ->
                 _uiState.value = _uiState.value.copy(isServiceRunning = running)
+            }
+        }
+
+        // Observe Voice Dictation states
+        viewModelScope.launch {
+            voiceDictationManager.isListening.collect { listening ->
+                _uiState.value = _uiState.value.copy(
+                    voiceStatusMessage = if (listening) "Escuchando... puedes hablar" else "Preparando micrófono..."
+                )
+            }
+        }
+
+        viewModelScope.launch {
+            voiceDictationManager.rmsLevel.collect { rms ->
+                _uiState.value = _uiState.value.copy(voiceRms = rms)
+            }
+        }
+
+        viewModelScope.launch {
+            voiceDictationManager.voiceEvents.collect { event ->
+                handleVoiceEvent(event)
             }
         }
 
@@ -229,8 +260,6 @@ class ClipSyncViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    private var historyDebounceJob: Job? = null
-
     private fun scheduleHistoryRecord(text: String, immediate: Boolean = false) {
         historyDebounceJob?.cancel()
         val trimmed = text.trim()
@@ -305,4 +334,98 @@ class ClipSyncViewModel(application: Application) : AndroidViewModel(application
             }
         }
     }
+
+    private var baseTextBeforeSpeech: String = ""
+
+    private fun handleVoiceEvent(event: com.example.clipsync.voice.VoiceEvent) {
+        when (event) {
+            is com.example.clipsync.voice.VoiceEvent.Ready -> {
+                _uiState.value = _uiState.value.copy(
+                    voiceStatusMessage = "Escuchando... habla ahora"
+                )
+            }
+            is com.example.clipsync.voice.VoiceEvent.PartialResult -> {
+                _uiState.value = _uiState.value.copy(
+                    voicePartialText = event.text,
+                    voiceStatusMessage = "Escuchando..."
+                )
+                val combined = if (baseTextBeforeSpeech.isBlank()) {
+                    event.text
+                } else {
+                    "${baseTextBeforeSpeech.trimEnd()} ${event.text}"
+                }
+                onTextChanged(combined)
+            }
+            is com.example.clipsync.voice.VoiceEvent.FinalResult -> {
+                baseTextBeforeSpeech = if (baseTextBeforeSpeech.isBlank()) {
+                    event.text.trim()
+                } else {
+                    "${baseTextBeforeSpeech.trimEnd()} ${event.text.trim()}"
+                }
+                _uiState.value = _uiState.value.copy(
+                    voicePartialText = "",
+                    voiceStatusMessage = "Escuchando... puedes seguir hablando"
+                )
+                onTextChanged(baseTextBeforeSpeech)
+                performSync(baseTextBeforeSpeech)
+            }
+            is com.example.clipsync.voice.VoiceEvent.Error -> {
+                _uiState.value = _uiState.value.copy(
+                    voiceStatusMessage = event.message
+                )
+            }
+            is com.example.clipsync.voice.VoiceEvent.EndOfSpeech -> {
+                // In continuous mode, VoiceDictationManager auto-restarts seamlessly
+            }
+        }
+    }
+
+    fun startVoiceListening() {
+        baseTextBeforeSpeech = _uiState.value.text
+        _uiState.value = _uiState.value.copy(
+            isVoiceListening = true,
+            voicePartialText = "",
+            voiceStatusMessage = "Escuchando... habla con libertad"
+        )
+        voiceDictationManager.isContinuous = _uiState.value.isVoiceContinuous
+        voiceDictationManager.startListening()
+    }
+
+    fun stopVoiceListening() {
+        _uiState.value = _uiState.value.copy(
+            isVoiceListening = false,
+            voicePartialText = ""
+        )
+        voiceDictationManager.stopListening()
+    }
+
+    fun toggleVoiceListening() {
+        if (_uiState.value.isVoiceListening) {
+            stopVoiceListening()
+        } else {
+            startVoiceListening()
+        }
+    }
+
+    fun setVoiceContinuous(continuous: Boolean) {
+        _uiState.value = _uiState.value.copy(isVoiceContinuous = continuous)
+        voiceDictationManager.isContinuous = continuous
+    }
+
+    fun sendVoiceEnter() {
+        viewModelScope.launch {
+            val config = _uiState.value.serverConfig
+            val currentText = _uiState.value.text
+            repository.sendDirectType(currentText, config, enter = true)
+            // Also append newline locally
+            onTextChanged("$currentText\n")
+            baseTextBeforeSpeech = "$currentText\n"
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        voiceDictationManager.destroyRecognizer()
+    }
 }
+
